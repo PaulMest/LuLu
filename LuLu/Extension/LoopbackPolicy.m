@@ -8,6 +8,7 @@
 @property(nonatomic)BOOL active;
 @property(nonatomic)BOOL known;
 @property(nonatomic)BOOL bypass;
+@property(nonatomic)BOOL committedBypass;
 @end
 
 @implementation LoopbackPolicy
@@ -24,17 +25,18 @@
 
 -(void)startWithBypass:(BOOL)bypass completion:(LuLuPolicyCompletion)completion
 {
-    [self enqueue:bypass start:YES completion:completion];
+    [self enqueue:bypass start:YES committed:YES completion:completion];
 }
 
 -(void)setBypass:(BOOL)bypass completion:(LuLuPolicyCompletion)completion
 {
-    [self enqueue:bypass start:NO completion:completion];
+    [self enqueue:bypass start:NO committed:YES completion:completion];
 }
 
--(void)enqueue:(BOOL)bypass start:(BOOL)start completion:(LuLuPolicyCompletion)completion
+-(void)enqueue:(BOOL)bypass start:(BOOL)start committed:(BOOL)committed completion:(LuLuPolicyCompletion)completion
 {
     dispatch_async(self.queue, ^{
+        if(committed) self.committedBypass = bypass;
         LuLuPolicyCompletion reply = completion ?: ^(NSError* error) {};
         [self.requests addObject:@{@"bypass":@(bypass), @"start":@(start), @"reply":[reply copy]}];
         [self drain];
@@ -55,7 +57,7 @@
         self.active = YES;
         self.known = NO;
     }
-    BOOL bypass = [request[@"bypass"] boolValue];
+    BOOL bypass = [request[@"reconcile"] boolValue] ? self.committedBypass : [request[@"bypass"] boolValue];
     if(!self.active || (self.known && bypass == self.bypass)) {
         [self finish:nil];
         return;
@@ -86,11 +88,17 @@
     if(bypass) return nil;
     dispatch_semaphore_t finished = dispatch_semaphore_create(0);
     __block NSError* applyError = nil;
-    [self setBypass:NO completion:^(NSError* error) {
+    [self enqueue:NO start:NO committed:NO completion:^(NSError* error) {
         applyError = error;
         dispatch_semaphore_signal(finished);
     }];
     if(dispatch_semaphore_wait(finished, dispatch_time(DISPATCH_TIME_NOW, timeout * NSEC_PER_SEC))) {
+        // Resolve the desired value when this request drains, not when timeout fires.
+        // A newer committed restriction can therefore never be undone by recovery.
+        dispatch_async(self.queue, ^{
+            [self.requests addObject:@{@"reconcile":@YES, @"reply":[^(NSError* error) {} copy]}];
+            [self drain];
+        });
         return [NSError errorWithDomain:@"com.objective-see.lulu.loopback-policy"
                                    code:1 userInfo:@{NSLocalizedDescriptionKey:@"Timed out restoring loopback filtering"}];
     }

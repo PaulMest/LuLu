@@ -97,12 +97,14 @@ int main(void) {
     [policy setBypass:NO completion:^(NSError* error) { dispatch_semaphore_signal(done); }];
     waitFor(ne.applied); [ne complete:nil]; waitFor(done);
     CHECK(ne.actions.count == 4, "failure incorrectly acknowledged desired state");
-    // Timeout rejects a restrictive transition; its eventual apply remains conservative.
+    // Timeout rejects the transition, then restores the latest committed optimization.
     [policy setBypass:YES completion:^(NSError* error) { dispatch_semaphore_signal(done); }];
     waitFor(ne.applied); [ne complete:nil]; waitFor(done);
     NSError* timeout = [policy prepareForBypass:NO timeout:.02];
     CHECK(timeout.code == 1, "timeout did not reject transition");
     waitFor(ne.applied); CHECK([ne.actions.lastObject isEqual:@NO], "timeout queued permissive settings");
+    [ne complete:nil];
+    waitFor(ne.applied); CHECK([ne.actions.lastObject boolValue], "timeout did not restore committed bypass");
     [ne complete:nil];
     [policy stopWithCompletion:^{ dispatch_semaphore_signal(done); }]; waitFor(done);
     [policy setBypass:YES completion:^(NSError* error) { dispatch_semaphore_signal(done); }]; waitFor(done);
@@ -129,6 +131,7 @@ int main(void) {
     [ne complete:failure()]; waitFor(changed);
     CHECK(!updated && ![prefs.preferences[PREF_BLOCK_MODE] boolValue], "failed apply committed restrictive prefs");
     CHECK(![[NSDictionary dictionaryWithContentsOfFile:prefsPath][PREF_BLOCK_MODE] boolValue], "failed apply saved restrictive prefs");
+    waitFor(ne.applied); CHECK([ne.actions.lastObject boolValue], "failed apply did not reconcile committed policy"); [ne complete:nil];
     dispatch_async(dispatch_get_global_queue(0,0), ^{ updated=[prefs update:@{PREF_BLOCK_MODE:@YES} replace:NO]; dispatch_semaphore_signal(changed); });
     waitFor(ne.applied); [ne complete:nil]; waitFor(changed);
     CHECK(updated && [prefs.preferences[PREF_BLOCK_MODE] boolValue], "successful restriction not committed");
