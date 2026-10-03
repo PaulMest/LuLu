@@ -52,6 +52,11 @@ extern Alerts* alerts;
 //prefs obj
 extern Preferences* preferences;
 
+@interface Rules ()
+// This path belongs to the in-memory collection, not the selected preference profile.
+@property(nonatomic, copy)NSString* persistencePath;
+@end
+
 @implementation Rules
 
 @synthesize rules;
@@ -66,6 +71,7 @@ extern Preferences* preferences;
     {
         //alloc rules dictionary
         rules = [NSMutableDictionary dictionary];
+        self.persistencePath = [self getPath];
         
         //init XPC client
         xpcUserClient = [[XPCUserClient alloc] init];
@@ -347,8 +353,8 @@ bail:
     {
 
     //unarchive
-    self.rules = [self unarchiveRulesData:archivedRules];
-    if(nil == self.rules)
+    NSMutableDictionary* loaded = [[self unarchiveRulesData:archivedRules] mutableCopy];
+    if(nil == loaded)
     {
         //err msg
         os_log_error(logHandle, "ERROR: failed to unarchive rules from %{public}@", RULES_FILE);
@@ -357,6 +363,9 @@ bail:
         goto bail;
     }
     
+    // Publish collection and persistence destination as one rules-lock transaction.
+    [self activateRules:loaded fromPath:rulesFile];
+
     //make sure all item rules have a set for 'external' paths
     // older rules didn't use this, so let's make do it here manually
     for(NSString* key in self.rules)
@@ -1355,14 +1364,28 @@ bail:
 // note: temporary rules are ignored
 -(BOOL)save
 {
+    @synchronized(self) {
+        return [self saveToPath:self.persistencePath];
+    }
+}
+
+// Never acquire the preference writer lock here: flow callbacks also save rules.
+-(void)activateRules:(NSMutableDictionary*)next fromPath:(NSString*)rulesFile
+{
+    @synchronized(self) {
+        self.rules = next;
+        self.persistencePath = rulesFile;
+    }
+}
+
+-(BOOL)saveToPath:(NSString*)rulesFile
+{
     //result
     BOOL result = NO;
     
     //error
     NSError* error = nil;
     
-    //rule's file
-    NSString* rulesFile = nil;
     
     //persistent rules
     NSMutableDictionary* persistentRules = nil;
@@ -1376,8 +1399,6 @@ bail:
     //init
     persistentRules = [NSMutableDictionary dictionary];
     
-    //init path
-    rulesFile = [self getPath];
     
     //dbg msg
     os_log_debug(logHandle, "saving (non-temp) rules to %{public}@", rulesFile);

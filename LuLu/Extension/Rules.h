@@ -62,6 +62,12 @@
 //save
 -(BOOL)save;
 
+// Atomically bind an activated collection to its persistence destination.
+-(void)activateRules:(NSMutableDictionary*)next fromPath:(NSString*)rulesFile;
+
+// Persist an isolated rules instance when preparing a profile.
+-(BOOL)saveToPath:(NSString*)rulesFile;
+
 //import rules
 -(BOOL)import:(NSData*)rules userOnly:(BOOL)userOnly;
 

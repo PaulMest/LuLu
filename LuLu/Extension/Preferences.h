@@ -14,12 +14,15 @@
 /* PROPERTIES */
 
 //preferences
-@property(nonatomic, retain)NSMutableDictionary* preferences;
+@property(atomic, copy)NSDictionary* preferences;
 
 /* METHODS */
 
 //load prefs from disk
 -(BOOL)load;
+
+// Validate and activate a profile before publishing its preferences.
+-(BOOL)loadProfile:(NSString*)profilePath;
 
 //update prefs
 // saves and handles logic for specific prefs
@@ -29,11 +32,11 @@
 -(BOOL)save;
 
 //get current profile
-// this is saved in the default preferences (and may be nil)
+// cached separately from the writer lock for flow-path readers (may be nil)
 -(NSString*)getCurrentProfile;
 
 //set current profile
 // this is saved in the default preferences (and may be nil)
--(void)setCurrentProfile:(NSString*)profilePath;
+-(BOOL)setCurrentProfile:(NSString*)profilePath;
 
 @end

@@ -11,6 +11,8 @@
 @import OSLog;
 @import NetworkExtension;
 
+@class Process;
+@class LoopbackPolicy;
 #import "GrayList.h"
 
 @interface FilterDataProvider : NEFilterDataProvider
@@ -29,7 +31,14 @@
 //timer to reap flows whose process has terminated
 @property(nonatomic, strong)dispatch_source_t reapTimer;
 
+//serialized NE loopback policy
+@property(nonatomic, strong)LoopbackPolicy* loopbackPolicy;
+
 /* METHODS */
+
+// Called only by synchronous preference writers on XPC threads, never by NE callbacks.
+-(BOOL)prepareForPreferences:(NSDictionary*)next;
+-(void)didCommitPreferences:(NSDictionary*)committed;
 
 //get best hostname from flow
 // prioritizes domain names over IP addresses

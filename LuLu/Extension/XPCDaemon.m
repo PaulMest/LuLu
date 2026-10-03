@@ -65,16 +65,14 @@ extern os_log_t logHandle;
     //dbg msg
     os_log_debug(logHandle, "XPC request: '%s' (%{public}@)", __PRETTY_FUNCTION__, updates);
     
-    //call into prefs obj
-    if(YES != [preferences update:updates replace:NO])
-    {
-        //err msg
-        os_log_error(logHandle, "ERROR: failed to updates to preferences");
+    if(![preferences update:updates replace:NO]) {
+        NSMutableDictionary* result = [preferences.preferences mutableCopy] ?: [NSMutableDictionary dictionary];
+        result[KEY_PREFERENCES_UPDATE_ERROR] = @YES;
+        reply(result);
+        return;
     }
-    
-    //reply w/ prefs
     reply(preferences.preferences);
-    
+
     return;
 }
 
@@ -399,21 +397,12 @@ bail:
         }
     }
 
-    //set
-    [profiles set:newProfilePath];
-
-    //reload rules
-    [rules load];
-
-    //tell user rules changed
-    // ...in case rule's window need refreshing
-    [alerts.xpcUserClient rulesChanged];
-
-    //reload prefs
-    [preferences load];
-
-    //happy
-    wasSet = YES;
+    @synchronized(preferences) {
+        if(![preferences loadProfile:newProfilePath]) goto bail;
+        [rules load];
+        [alerts.xpcUserClient rulesChanged];
+        wasSet = YES;
+    }
 
     //dbg msg
     os_log_debug(logHandle, "set profile to %{public}@", newProfilePath ? newProfilePath : @"Default");
@@ -442,17 +431,16 @@ bail:
         goto bail;
     }
 
-    //delete profile
-    if(YES != [profiles delete:name])
-    {
-        //err msg
-        os_log_error(logHandle, "ERROR: failed to delete profile");
-        goto bail;
+    @synchronized(preferences) {
+        NSString* previous = [preferences getCurrentProfile];
+        wasDeleted = [profiles delete:name];
+        NSString* current = [preferences getCurrentProfile];
+        if(!((previous == current) || [previous isEqualToString:current])) {
+            [alerts.xpcUserClient rulesChanged];
+        }
     }
-    
-    //happy
-    wasDeleted = YES;
-    
+    if(!wasDeleted) goto bail;
+
     //dbg msg
     os_log_debug(logHandle, "deleted profile %{public}@", name);
     

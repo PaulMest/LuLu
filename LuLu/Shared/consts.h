@@ -12,6 +12,9 @@
 
 #import <Foundation/Foundation.h>
 
+// Transient XPC reply status, never persisted as a preference.
+#define KEY_PREFERENCES_UPDATE_ERROR @"preferencesUpdateError"
+
 //signers
 enum Signer{None, Apple, AppStore, DevID, AdHoc};
 

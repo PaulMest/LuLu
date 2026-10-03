@@ -9,6 +9,9 @@
 #import "consts.h"
 #import "BlockOrAllowList.h"
 #import "Preferences.h"
+#import "FilterDataProvider.h"
+
+extern FilterDataProvider* provider;
 
 /* GLOBALS */
 
@@ -20,6 +23,10 @@ extern BlockOrAllowList* allowList;
 
 //block list
 extern BlockOrAllowList* blockList;
+
+@interface Preferences ()
+@property(atomic, copy)NSString* cachedProfile;
+@end
 
 @implementation Preferences
 
@@ -35,21 +42,23 @@ extern BlockOrAllowList* blockList;
     {
         //default prefs exist?
         // load them from disk
-        if(YES == [NSFileManager.defaultManager fileExistsAtPath:[INSTALL_DIRECTORY stringByAppendingPathComponent:PREFS_FILE]])
+        if(YES == [NSFileManager.defaultManager fileExistsAtPath:[self defaultPath]])
         {
+            // Cache selection before loading; flow-path readers never take the writer lock.
+            self.cachedProfile = [NSDictionary dictionaryWithContentsOfFile:[self defaultPath]][PREF_CURRENT_PROFILE];
             //load
             if(YES != [self load])
             {
                 //err msg
                 os_log_error(logHandle, "ERROR: failed to loads preferences from %@", PREFS_FILE);
-                
+
                 //unset
                 self = nil;
-                
+
                 //bail
                 goto bail;
             }
-            
+
         }
         //no prefs (yet)
         // just initialze empty dictionary
@@ -59,10 +68,16 @@ extern BlockOrAllowList* blockList;
             self.preferences = [NSMutableDictionary dictionary];
         }
     }
-    
+
 bail:
-    
+
     return self;
+}
+
+//default preference file (also contains the selected profile)
+-(NSString*)defaultPath
+{
+    return [INSTALL_DIRECTORY stringByAppendingPathComponent:PREFS_FILE];
 }
 
 //get path to preferences
@@ -71,22 +86,22 @@ bail:
 {
     //current profile
     NSString* currentProfile = nil;
-    
+
     //path
     // init with default
-    NSString* path = [INSTALL_DIRECTORY stringByAppendingPathComponent:PREFS_FILE];
-    
+    NSString* path = [self defaultPath];
+
     //not found?
     // that ok, likely just first time
     if(YES != [NSFileManager.defaultManager fileExistsAtPath:path])
     {
         //dbg msg
         os_log_debug(logHandle, "default preferences file '%{public}@' not found ...first time?", path);
-        
+
         //done
         goto bail;
     }
-    
+
     //get current profile
     currentProfile = [self getCurrentProfile];
     if(nil != currentProfile)
@@ -94,69 +109,63 @@ bail:
         //set
         path = [currentProfile stringByAppendingPathComponent:PREFS_FILE];
     }
-    
+
 bail:
-    
+
     //dbg msg
     os_log_debug(logHandle, "using preferences file: %{public}@", path);
-    
+
     return path;
 }
 
-//load prefs from disk
+//load prefs from disk, including profile switches
 -(BOOL)load
 {
-    //flag
-    BOOL loaded = NO;
-    
-    //path
-    NSString* prefsFile = [self path];
-    
-    //load
-    self.preferences = [NSMutableDictionary dictionaryWithContentsOfFile:prefsFile];
-    if(nil == self.preferences)
-    {
-        //err msg
-        os_log_error(logHandle, "ERROR: failed to load preference from %{public}@", prefsFile);
-        goto bail;
+    @synchronized(self) {
+        NSString* prefsFile = [self path];
+        NSMutableDictionary* next = [NSMutableDictionary dictionaryWithContentsOfFile:prefsFile];
+        if(!next) {
+            os_log_error(logHandle, "ERROR: failed to load preferences from %{public}@", prefsFile);
+            return NO;
+        }
+        BOOL addedDefault = (next[PREF_ALLOW_LOCALHOST] == nil);
+        if(addedDefault) next[PREF_ALLOW_LOCALHOST] = @YES;
+        if(provider && ![provider prepareForPreferences:next]) {
+            [provider didCommitPreferences:self.preferences];
+            return NO;
+        }
+        if(addedDefault && ![next writeToFile:prefsFile atomically:YES]) {
+            if(provider) [provider didCommitPreferences:self.preferences];
+            return NO;
+        }
+        self.preferences = next;
+        if(provider) [provider didCommitPreferences:next];
+        return YES;
     }
-    
-    //dbg msg
-    os_log_debug(logHandle, "from %{public}@, loaded preferences: %{public}@", prefsFile, self.preferences);
-    
-    //set any defaults
-    [self setDefaults];
-    
-    //happy
-    loaded = YES;
-    
-bail:
-    
-    return loaded;
 }
 
-//set any defaults
-// needed as upgrades don't (re)display welcome window
--(void)setDefaults {
-    
-    //flag
-    BOOL shouldSave = NO;
-    
-    //PREF_ALLOW_LOCALHOST: default to YES for existing users
-    if(!self.preferences[PREF_ALLOW_LOCALHOST]) {
-    
-        os_log_debug(logHandle, "setting default value for PREF_ALLOW_LOCALHOST: YES");
-        
-        //set default
-        self.preferences[PREF_ALLOW_LOCALHOST] = @YES;
-        shouldSave = YES;
-    }
-    
-    //could add any others here...
-    
-    //save
-    if(shouldSave) {
-        [self save];
+// Activate a fully prepared profile. No selection is changed on a failed barrier/save.
+-(BOOL)loadProfile:(NSString*)profilePath
+{
+    @synchronized(self) {
+        NSString* file = profilePath ? [profilePath stringByAppendingPathComponent:PREFS_FILE] : [self defaultPath];
+        NSMutableDictionary* next = [NSMutableDictionary dictionaryWithContentsOfFile:file];
+        if(!next) return NO;
+        BOOL addedDefault = !next[PREF_ALLOW_LOCALHOST];
+        if(addedDefault) next[PREF_ALLOW_LOCALHOST] = @YES;
+        if(provider && ![provider prepareForPreferences:next]) {
+            [provider didCommitPreferences:self.preferences];
+            return NO;
+        }
+        if((addedDefault && ![next writeToFile:file atomically:YES]) || ![self setCurrentProfile:profilePath]) {
+            if(provider) [provider didCommitPreferences:self.preferences];
+            return NO;
+        }
+        [next removeObjectForKey:PREF_CURRENT_PROFILE];
+        [self reloadLists:next];
+        self.preferences = next;
+        if(provider) [provider didCommitPreferences:next];
+        return YES;
     }
 }
 
@@ -166,59 +175,58 @@ bail:
 {
     //flag
     BOOL updated = NO;
-    
-    //allow list
-    NSString* allowListPath = nil;
-    
-    //block list
-    NSString* blockListPath = nil;
-    
+    NSMutableDictionary* next = nil;
+
     //sync
     @synchronized (self) {
 
-    //replace?
-    // e.g. new profile
-    if(YES == replace)
-    {
-        //dbg msg
-        os_log_debug(logHandle, "replacing preferences (%{public}@)", updates);
-        
-        //replace
-        self.preferences = [updates mutableCopy];
-    }
-    //merge
-    else
-    {
-        //dbg msg
-        os_log_debug(logHandle, "updating preferences (%{public}@)", updates);
-        
-        //add in (new) prefs
-        [self.preferences addEntriesFromDictionary:updates];
-    }
-        
-    //save
-    if(YES != [self save])
-    {
-        //err msg
-        os_log_error(logHandle, "ERROR: failed to save preferences");
-        
-        //bail
+    // Prepare a private candidate; published dictionaries are never mutated.
+    next = replace ? [updates mutableCopy] : [self.preferences mutableCopy];
+    if(!next) next = [NSMutableDictionary dictionary];
+    if(!replace) [next addEntriesFromDictionary:updates];
+    if(provider && ![provider prepareForPreferences:next]) {
+        [provider didCommitPreferences:self.preferences];
         goto bail;
     }
 
+    // Persist before publishing. A failed save leaves the old preferences intact.
+    if(![next writeToFile:[self path] atomically:YES]) {
+        os_log_error(logHandle, "ERROR: failed to save preferences; change rejected");
+        if(provider) [provider didCommitPreferences:self.preferences];
+        goto bail;
+    }
+
+    [self reloadLists:updates];
+
+    // Publish only after any lists have been loaded.
+    self.preferences = next;
+    if(provider) [provider didCommitPreferences:next];
+    updated = YES;
+
+    } //sync
+
+bail:
+    return updated;
+}
+
+// Reload lists only after the candidate has passed its barrier and persistence checks.
+-(void)reloadLists:(NSDictionary*)values
+{
+    NSString* allowListPath = nil;
+    NSString* blockListPath = nil;
     //extract any allow list
-    allowListPath = updates[PREF_ALLOW_LIST];
-    
+    allowListPath = values[PREF_ALLOW_LIST];
+
     //extract any block list
-    blockListPath = updates[PREF_BLOCK_LIST];
-    
+    blockListPath = values[PREF_BLOCK_LIST];
+
     //(new) allow list?
     // now, trigger reload
     if(0 != [allowListPath length])
     {
         //dbg msg
         os_log_debug(logHandle, "user specified new 'allow' list: %{public}@", allowListPath);
-        
+
         //first time?
         if(nil == allowList)
         {
@@ -273,15 +281,7 @@ bail:
         //clear (empties items & stops any reload timer)
         [blockList clear];
     }
-    
-    //happy
-    updated = YES;
-        
-    } //sync
-    
-bail:
-    
-    return updated;
+
 }
 
 //save to disk
@@ -289,13 +289,13 @@ bail:
 {
     //flag
     BOOL wasSaved = NO;
-    
+
     //dbg msg
     os_log_debug(logHandle, "method '%s' invoked", __PRETTY_FUNCTION__);
-    
+
     //init w/ default
     NSString* prefsFile = [self path];
-    
+
     //write out preferences
     if(YES != [self.preferences writeToFile:prefsFile atomically:YES])
     {
@@ -303,15 +303,15 @@ bail:
         os_log_error(logHandle, "ERROR: failed to save preferences to: %{public}@", prefsFile);
         goto bail;
     }
-    
+
     //dbg msg
     os_log_debug(logHandle, "saved preferences to %{public}@", prefsFile);
-    
+
     //happy
     wasSaved = YES;
-    
+
 bail:
-    
+
     return wasSaved;
 }
 
@@ -319,44 +319,35 @@ bail:
 // this is saved in the default preferences (and may be nil)
 -(NSString*)getCurrentProfile
 {
-    //current
-    NSString* currentProfile = nil;
-    
-    //dbg msg
-    os_log_debug(logHandle, "method '%s' invoked", __PRETTY_FUNCTION__);
-    
-    //load *default* prefs
-    NSDictionary* defaultPreferences = [NSDictionary dictionaryWithContentsOfFile:[INSTALL_DIRECTORY stringByAppendingPathComponent:PREFS_FILE]];
-    
-    //extract
-    currentProfile = defaultPreferences[PREF_CURRENT_PROFILE];
-    
-    //dbg msg
-    os_log_debug(logHandle, "returning current profile %{public}@", currentProfile);
-    
-    return currentProfile;
+    return self.cachedProfile;
+
 }
 
 //set current profile
 // this is saved in the *default* preferences (and may be nil)
--(void)setCurrentProfile:(NSString*)profilePath
+-(BOOL)setCurrentProfile:(NSString*)profilePath
 {
+    @synchronized(self) {
     //default pref's file
-    NSString* defaultPreferencesFile = [INSTALL_DIRECTORY stringByAppendingPathComponent:PREFS_FILE];
-    
+    NSString* defaultPreferencesFile = [self defaultPath];
+
     //load *default* prefs
     NSMutableDictionary* defaultPreferences = [NSMutableDictionary dictionaryWithContentsOfFile:defaultPreferencesFile];
-    
+
+    if(!defaultPreferences) return NO;
+
     //set
     defaultPreferences[PREF_CURRENT_PROFILE] = profilePath;
-    
+
     //save
-    [defaultPreferences writeToFile:defaultPreferencesFile atomically:YES];
-    
+    if(![defaultPreferences writeToFile:defaultPreferencesFile atomically:YES]) return NO;
+
     //dbg msg
     os_log_debug(logHandle, "set current profile to %{public}@", profilePath);
-    
-    return;
+
+    self.cachedProfile = profilePath;
+    return YES;
+    }
 }
 
 @end

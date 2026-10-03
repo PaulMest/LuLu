@@ -61,7 +61,9 @@ extern Preferences* preferences;
         NSString* fullPath = [self.directory stringByAppendingPathComponent:name];
         
         //add if directory
-        if([NSFileManager.defaultManager fileExistsAtPath:fullPath isDirectory:&isDir] && isDir)
+        if([NSFileManager.defaultManager fileExistsAtPath:fullPath isDirectory:&isDir] && isDir
+           && [NSFileManager.defaultManager fileExistsAtPath:[fullPath stringByAppendingPathComponent:PREFS_FILE]]
+           && [NSFileManager.defaultManager fileExistsAtPath:[fullPath stringByAppendingPathComponent:RULES_FILE]])
         {
             //add
             [profiles addObject:name];
@@ -124,180 +126,85 @@ bail:
 // and then set it to default
 -(BOOL)add:(NSString*)name preferences:(NSDictionary*)newPreferences
 {
-    BOOL wasAdded = NO;
-    NSError* error = nil;
-    NSString *newProfilePath = nil;
-    
-    //dbg msg
-    os_log_debug(logHandle, "method '%s' invoked with %{public}@ / %{public}@", __PRETTY_FUNCTION__, name, newPreferences);
-
-    //create base profiles directory if needed
-    if(YES != [NSFileManager.defaultManager fileExistsAtPath:self.directory])
-    {
-        //create
-        if(YES != [NSFileManager.defaultManager createDirectoryAtPath:self.directory withIntermediateDirectories:YES attributes:nil error:&error])
-        {
-            //error
-            os_log_error(logHandle, "ERROR: failed to create profiles directory '%{public}@': %{public}@",
-                         self.directory, error.localizedDescription);
-            goto bail;
+    @synchronized(preferences) {
+        NSFileManager* files = NSFileManager.defaultManager;
+        NSString* destination = [self resolve:name];
+        if(!destination) return NO;
+        BOOL isDirectory = NO;
+        BOOL exists = [files fileExistsAtPath:destination isDirectory:&isDirectory];
+        // Preserve legacy incomplete folders outside the selectable namespace.
+        if(exists && (!isDirectory ||
+            ([files fileExistsAtPath:[destination stringByAppendingPathComponent:PREFS_FILE]] &&
+             [files fileExistsAtPath:[destination stringByAppendingPathComponent:RULES_FILE]]))) return NO;
+        NSString* preserved = exists ? [self.directory.stringByDeletingLastPathComponent stringByAppendingPathComponent:
+            [@".lulu-incomplete-" stringByAppendingString:NSUUID.UUID.UUIDString]] : nil;
+        if(![files createDirectoryAtPath:self.directory withIntermediateDirectories:YES attributes:nil error:nil]) return NO;
+        // Stage outside the enumerated profile directory; never expose incomplete profiles.
+        NSString* staging = [self.directory.stringByDeletingLastPathComponent stringByAppendingPathComponent:
+            [@".lulu-profile-" stringByAppendingString:NSUUID.UUID.UUIDString]];
+        if(![files createDirectoryAtPath:staging withIntermediateDirectories:NO attributes:nil error:nil]) return NO;
+        BOOL added = NO;
+        BOOL moved = NO;
+        BOOL preservedOld = NO;
+        @try {
+            NSMutableDictionary* candidate = [newPreferences mutableCopy];
+            if(!candidate[PREF_ALLOW_LOCALHOST]) candidate[PREF_ALLOW_LOCALHOST] = @YES;
+            if(![candidate writeToFile:[staging stringByAppendingPathComponent:PREFS_FILE] atomically:YES]) return NO;
+            Rules* initialRules = [Rules new];
+            if(![initialRules generateDefaultRules] || ![initialRules saveToPath:[staging stringByAppendingPathComponent:RULES_FILE]]) return NO;
+            if(preserved) {
+                if(![files moveItemAtPath:destination toPath:preserved error:nil]) return NO;
+                preservedOld = YES;
+            }
+            if(![files moveItemAtPath:staging toPath:destination error:nil]) return NO;
+            moved = YES;
+            if(![preferences loadProfile:destination]) return NO;
+            [rules activateRules:initialRules.rules fromPath:[destination stringByAppendingPathComponent:RULES_FILE]];
+            added = YES;
+            return YES;
+        } @finally {
+            if(!added && ![files removeItemAtPath:moved ? destination : staging error:nil]) {
+                os_log_error(logHandle, "ERROR: failed to clean up incomplete profile");
+            }
+            if(!added && preservedOld && ![files moveItemAtPath:preserved toPath:destination error:nil]) {
+                os_log_error(logHandle, "ERROR: could not restore incomplete profile; preserved at %{public}@", preserved);
+            }
         }
     }
-    
-    //init path for new profile directory
-    // note: resolves name, ensuring the result is within the profiles directory
-    newProfilePath = [self resolve:name];
-    if(nil == newProfilePath)
-    {
-        //err msg
-        os_log_error(logHandle, "ERROR: failed to resolve profile name '%{public}@'", name);
-        goto bail;
-    }
-    
-    //if already exists, delete it
-    if(YES == [NSFileManager.defaultManager fileExistsAtPath:newProfilePath]) {
-        
-        //remove install directory
-        if(YES != [NSFileManager.defaultManager removeItemAtPath:newProfilePath error:&error])
-        {
-            //err msg
-            os_log_error(logHandle, "ERROR: failed to remove existing profile %{public}@ (error: %{public}@)", newProfilePath, error);
-        }
-        else
-        {
-            //dbg msg
-            os_log_debug(logHandle, "removed existing profile %{public}@", newProfilePath);
-        }
-    }
-    
-    //create directory for new profile
-    if(YES != [NSFileManager.defaultManager createDirectoryAtPath:newProfilePath withIntermediateDirectories:NO attributes:nil error:&error])
-    {
-        //err msg
-        os_log_error(logHandle, "ERROR: Failed to create new profile directory '%{public}@': %{public}@",
-                     newProfilePath, error.localizedDescription);
-        goto bail;
-    }
-    
-    //dbg msg
-    os_log_debug(logHandle, "created profile directory: %{public}@", newProfilePath);
-    
-    //set as current
-    [self set:newProfilePath];
-    
-    //save new prefs
-    // replacing all
-    [preferences update:newPreferences replace:YES];
-    
-    //clear out all rules
-    @synchronized (rules) {
-        
-        [rules.rules removeAllObjects];
-    }
-    
-    //generate default rules
-    if(YES != [rules generateDefaultRules])
-    {
-        //err msg
-        os_log_error(logHandle, "ERROR: failed to generate default rules");
-        
-        //bail
-        goto bail;
-    }
-    
-    //save
-    [rules save];
-    
-    //reload rules
-    [rules load];
-    
-    //reload prefs
-    [preferences load];
-
-    //happy
-    wasAdded = YES;
-    
-bail:
-    
-    return wasAdded;
 }
 
 //set current profile path in *default* prefs
 // note: can be called with nil to reset back to default profile
--(void)set:(NSString*)profilePath
+-(BOOL)set:(NSString*)profilePath
 {
-    //set
-    [preferences setCurrentProfile:profilePath];
-    
-    return;
+    @synchronized(preferences) {
+        return [preferences setCurrentProfile:profilePath];
+    }
 }
 
 //delete a profile
 // delete folder matching name and reset to default if needed
 -(BOOL)delete:(NSString*)name
 {
-    //flag
-    BOOL wasDeleted = NO;
-    
-    //error
-    NSError* error = nil;
-    
-    //current
-    NSString* current = nil;
-    
-    //path
-    // note: resolves (client-supplied) name, ensuring it's within the profiles directory
-    NSString* profile = [self resolve:name];
-    if(nil == profile)
-    {
-        //err msg
-        os_log_error(logHandle, "ERROR: failed to resolve profile name '%{public}@'", name);
-        goto bail;
+    @synchronized(preferences) {
+        NSString* profile = [self resolve:name];
+        if(!profile) return NO;
+        NSString* current = [preferences getCurrentProfile];
+        BOOL active = [profile isEqualToString:current];
+        if(active && ![preferences loadProfile:nil]) return NO;
+        NSError* error = nil;
+        if(![NSFileManager.defaultManager removeItemAtPath:profile error:&error]) {
+            os_log_error(logHandle, "ERROR: failed to delete profile: %{public}@", error);
+            if(active && ![preferences loadProfile:current]) {
+                // Do not pretend rollback succeeded. XPC compares the final selection and notifies.
+                os_log_error(logHandle, "ERROR: could not restore profile after failed deletion");
+                [rules load];
+            }
+            return NO;
+        }
+        if(active) [rules load];
+        return YES;
     }
-
-    //dbg msg
-    os_log_debug(logHandle, "deleting profile directory: %{public}@", profile);
-    
-    //flag
-    if(YES != [NSFileManager.defaultManager removeItemAtPath:profile error:&error])
-    {
-        //err msg
-        os_log_error(logHandle, "ERROR: Failed to delete profile directory '%{public}@': %{public}@",
-                     profile, error.localizedDescription);
-        goto bail;
-    }
-    
-    //dbg msg
-    os_log_debug(logHandle, "deleted profile directory: %{public}@", profile);
-    
-    //get current
-    current = [preferences getCurrentProfile];
-    
-    //dbg msg
-    os_log_debug(logHandle, "checking if %{public}@ matches current %{public}@", profile, current);
-    
-    //was current?
-    if(YES == [profile isEqualToString:current])
-    {
-        //dbg msg
-        os_log_debug(logHandle, "'%{public}@' was current profile, so will reset back to default", profile);
-        
-        //unset path
-        [self set:nil];
-        
-        //reload rules
-        [rules load];
-        
-        //reload prefs
-        [preferences load];
-    }
-    
-    //happy
-    wasDeleted = YES;
-    
-bail:
-    
-    return wasDeleted;
 }
 
 @end

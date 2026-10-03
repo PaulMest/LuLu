@@ -219,6 +219,16 @@ extern NSMutableDictionary* alerts;
         
     }];
     
+    if([updatedPreferences[KEY_PREFERENCES_UPDATE_ERROR] boolValue]) {
+        NSMutableDictionary* committed = [updatedPreferences mutableCopy];
+        [committed removeObjectForKey:KEY_PREFERENCES_UPDATE_ERROR];
+        updatedPreferences = committed;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            showAlert(NSAlertStyleWarning, NSLocalizedString(@"Unable to Apply Preferences", @"Unable to Apply Preferences"),
+                      NSLocalizedString(@"LuLu could not apply this change. Your previous preferences remain in effect. Please try again.", @"Unable to apply preferences message"),
+                      @[NSLocalizedString(@"OK", @"OK")]);
+        });
+    }
     return updatedPreferences;
 }
 

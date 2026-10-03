@@ -16,6 +16,8 @@
 #import "Preferences.h"
 #import "XPCUserProto.h"
 #import "FilterDataProvider.h"
+#import "LoopbackFilterSettings.h"
+#import "LoopbackPolicy.h"
 
 //verdicts
 typedef NS_ENUM(NSInteger, FlowVerdict) {
@@ -74,6 +76,10 @@ extern BlockOrAllowList* blockList;
 
         //save global handle
         // allows the XPC listener to resume held flows when the client goes away
+        __weak typeof(self) policyProvider = self;
+        self.loopbackPolicy = [[LoopbackPolicy alloc] initWithApply:^(BOOL bypass, LuLuPolicyCompletion completion) {
+            [policyProvider applySettings:LuLuCreateFilterSettingsForBypass(bypass) completionHandler:completion];
+        }];
         provider = self;
 
         //start timer to reap flows of terminated processes
@@ -91,74 +97,33 @@ extern BlockOrAllowList* blockList;
 }
 
 //start filter
--(void)startFilterWithCompletionHandler:(void (^)(NSError *error))completionHandler {
-    
-    //rules
-    NSMutableArray<NEFilterRule*>* rules = nil;
+-(void)startFilterWithCompletionHandler:(void (^)(NSError *error))completionHandler
+{
+    // Enqueue startup while holding the same lock as preference writers.
+    @synchronized(preferences) {
+        [self.loopbackPolicy startWithBypass:LuLuCanBypassLoopback(preferences.preferences)
+                                completion:completionHandler];
+    }
+}
 
-    //network rules
-    NENetworkRule* anyOutboundRule = nil;
-    NENetworkRule* loopbackRule4 = nil;
-    NENetworkRule* loopbackRule6 = nil;
+// A restrictive change cannot be published until NE has removed its bypass.
+// XPC preference writers may wait here; the NE provider callback queue never does.
+-(BOOL)prepareForPreferences:(NSDictionary*)next
+{
+    NSError* error = [self.loopbackPolicy prepareForBypass:LuLuCanBypassLoopback(next) timeout:10];
+    if(error) {
+        os_log_error(logHandle, "ERROR: could not restore loopback filtering; preference change rejected: %{public}@", error);
+        return NO;
+    }
+    return YES;
+}
 
-    //filter settings
-    NEFilterSettings* filterSettings = nil;
-
-    //log msg
-    os_log_debug(logHandle, "%s", __PRETTY_FUNCTION__);
-
-    //init rules array
-    rules = [NSMutableArray array];
-
-    //Rule 1:
-    // IPv4 loopback (127.0.0.0/8), any port
-    NWHostEndpoint* loopback4 = [NWHostEndpoint endpointWithHostname:@"127.0.0.0" port:@"0"];
-    loopbackRule4 = [[NENetworkRule alloc] initWithRemoteNetwork:loopback4
-                                                   remotePrefix:8
-                                                    localNetwork:nil
-                                                     localPrefix:0
-                                                        protocol:NENetworkRuleProtocolAny
-                                                       direction:NETrafficDirectionOutbound];
-    [rules addObject:[[NEFilterRule alloc] initWithNetworkRule:loopbackRule4 action:NEFilterActionFilterData]];
-
-    //Rule 2:
-    // IPv6 loopback (::1/128), any port
-    NWHostEndpoint* loopback6 = [NWHostEndpoint endpointWithHostname:@"::1" port:@"0"];
-    loopbackRule6 = [[NENetworkRule alloc] initWithRemoteNetwork:loopback6
-                                                   remotePrefix:128
-                                                    localNetwork:nil
-                                                     localPrefix:0
-                                                        protocol:NENetworkRuleProtocolAny
-                                                       direction:NETrafficDirectionOutbound];
-    [rules addObject:[[NEFilterRule alloc] initWithNetworkRule:loopbackRule6 action:NEFilterActionFilterData]];
-
-    //Rule 3:
-    // any/all outbound traffic (non-loopback)
-    anyOutboundRule = [[NENetworkRule alloc] initWithRemoteNetwork:nil
-                                                     remotePrefix:0
-                                                      localNetwork:nil
-                                                       localPrefix:0
-                                                          protocol:NENetworkRuleProtocolAny
-                                                         direction:NETrafficDirectionOutbound];
-    [rules addObject:[[NEFilterRule alloc] initWithNetworkRule:anyOutboundRule action:NEFilterActionFilterData]];
-
-    //init filter settings
-    filterSettings = [[NEFilterSettings alloc] initWithRules:rules defaultAction:NEFilterActionAllow];
-
-    //apply rules
-    [self applySettings:filterSettings completionHandler:^(NSError * _Nullable error) {
-
-        //log msg
-        os_log_debug(logHandle, "'applySettings' completed");
-
-        //error?
-        if(nil != error) os_log_error(logHandle, "ERROR: failed to apply filter settings: %@", error.localizedDescription);
-
-        //call completion handler
-        completionHandler(error);
+// Permissive changes are published before bypassing. Failure leaves traffic filtered.
+-(void)didCommitPreferences:(NSDictionary*)committed
+{
+    [self.loopbackPolicy setBypass:LuLuCanBypassLoopback(committed) completion:^(NSError* error) {
+        if(error) os_log_error(logHandle, "ERROR: loopback optimization not applied; traffic remains filtered: %{public}@", error);
     }];
-
-    return;
 }
 
 //stop filter
@@ -186,7 +151,7 @@ extern BlockOrAllowList* blockList;
     [self resumeFlowsForKey:nil verdict:[NEFilterNewFlowVerdict allowVerdict]];
 
     //required
-    completionHandler();
+    [self.loopbackPolicy stopWithCompletion:completionHandler];
     
     return;
 }
