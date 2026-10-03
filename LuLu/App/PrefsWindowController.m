@@ -436,14 +436,6 @@ bail:
         case BUTTON_BLOCK_MODE:
             updatedPreferences[PREF_BLOCK_MODE] = state;
             
-            //enable?
-            // show alert
-            if(NSControlStateValueOn == state.longValue)
-            {
-                //show alert
-                showAlert(NSAlertStyleInformational, NSLocalizedString(@"Outgoing traffic will now be blocked.",@"Outgoing traffic will now be blocked."), NSLocalizedString(@"Note however:\r\n▪ Existing connections will not be impacted.\r\n▪ OS traffic (not routed thru LuLu) will not be blocked.",@"Note however:\r\n▪ Existing connections will not be impacted.\r\n▪ OS traffic (not routed thru LuLu) will not be blocked."), @[NSLocalizedString(@"OK", @"OK")]);
-            }
-            
             break;
             
         //no icon mode
@@ -484,6 +476,14 @@ bail:
         //send XPC msg to daemon to update prefs
         // returns (all/latest) prefs, which is what we want
         self.preferences = [xpcDaemonClient updatePreferences:updatedPreferences];
+        // Reflect the committed state, including a rejected restrictive change.
+        [self reload];
+        if([updatedPreferences[PREF_BLOCK_MODE] boolValue] && [self.preferences[PREF_BLOCK_MODE] boolValue]) {
+            showAlert(NSAlertStyleInformational, NSLocalizedString(@"Outgoing traffic will now be blocked.", @"Outgoing traffic will now be blocked."),
+                      NSLocalizedString(@"Existing connections and OS traffic not routed through LuLu are not affected.", @"Block mode limitations"),
+                      @[NSLocalizedString(@"OK", @"OK")]);
+        }
+
 
         //call back into app to process
         // e.g. show/hide status bar icon, etc.

@@ -124,9 +124,11 @@ bail:
 // and then set it to default
 -(BOOL)add:(NSString*)name preferences:(NSDictionary*)newPreferences
 {
+    @synchronized(preferences) {
     BOOL wasAdded = NO;
     NSError* error = nil;
     NSString *newProfilePath = nil;
+    NSString* previousProfile = nil;
     
     //dbg msg
     os_log_debug(logHandle, "method '%s' invoked with %{public}@ / %{public}@", __PRETTY_FUNCTION__, name, newPreferences);
@@ -182,12 +184,17 @@ bail:
     //dbg msg
     os_log_debug(logHandle, "created profile directory: %{public}@", newProfilePath);
     
+    previousProfile = [preferences getCurrentProfile];
+
     //set as current
-    [self set:newProfilePath];
+    if(![self set:newProfilePath]) goto bail;
     
     //save new prefs
     // replacing all
-    [preferences update:newPreferences replace:YES];
+    if(![preferences update:newPreferences replace:YES]) {
+        [self set:previousProfile];
+        goto bail;
+    }
     
     //clear out all rules
     @synchronized (rules) {
@@ -220,22 +227,24 @@ bail:
 bail:
     
     return wasAdded;
+    }
+
 }
 
 //set current profile path in *default* prefs
 // note: can be called with nil to reset back to default profile
--(void)set:(NSString*)profilePath
+-(BOOL)set:(NSString*)profilePath
 {
-    //set
-    [preferences setCurrentProfile:profilePath];
-    
-    return;
+    @synchronized(preferences) {
+        return [preferences setCurrentProfile:profilePath];
+    }
 }
 
 //delete a profile
 // delete folder matching name and reset to default if needed
 -(BOOL)delete:(NSString*)name
 {
+    @synchronized(preferences) {
     //flag
     BOOL wasDeleted = NO;
     
@@ -258,6 +267,16 @@ bail:
     //dbg msg
     os_log_debug(logHandle, "deleting profile directory: %{public}@", profile);
     
+    current = [preferences getCurrentProfile];
+    if([profile isEqualToString:current]) {
+        if(![self set:nil]) goto bail;
+        if(![preferences load]) {
+            [self set:current];
+            goto bail;
+        }
+        [rules load];
+    }
+
     //flag
     if(YES != [NSFileManager.defaultManager removeItemAtPath:profile error:&error])
     {
@@ -270,34 +289,14 @@ bail:
     //dbg msg
     os_log_debug(logHandle, "deleted profile directory: %{public}@", profile);
     
-    //get current
-    current = [preferences getCurrentProfile];
-    
-    //dbg msg
-    os_log_debug(logHandle, "checking if %{public}@ matches current %{public}@", profile, current);
-    
-    //was current?
-    if(YES == [profile isEqualToString:current])
-    {
-        //dbg msg
-        os_log_debug(logHandle, "'%{public}@' was current profile, so will reset back to default", profile);
-        
-        //unset path
-        [self set:nil];
-        
-        //reload rules
-        [rules load];
-        
-        //reload prefs
-        [preferences load];
-    }
-    
     //happy
     wasDeleted = YES;
     
 bail:
     
     return wasDeleted;
+    }
+
 }
 
 @end

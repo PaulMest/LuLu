@@ -19,7 +19,7 @@
 
 -(NSMutableArray*)enumerate;
 -(NSString*)resolve:(NSString*)name;
--(void)set:(NSString*)profilePath;
+-(BOOL)set:(NSString*)profilePath;
 -(BOOL)add:(NSString*)name preferences:(NSDictionary*)preferences;
 -(BOOL)delete:(NSString*)name;
 

@@ -14,7 +14,7 @@
 /* PROPERTIES */
 
 //preferences
-@property(nonatomic, retain)NSMutableDictionary* preferences;
+@property(atomic, copy)NSDictionary* preferences;
 
 /* METHODS */
 
@@ -34,6 +34,6 @@
 
 //set current profile
 // this is saved in the default preferences (and may be nil)
--(void)setCurrentProfile:(NSString*)profilePath;
+-(BOOL)setCurrentProfile:(NSString*)profilePath;
 
 @end

@@ -71,6 +71,7 @@
 		CDD7853D255609AC001BB0BE /* BlockOrAllowList.m in Sources */ = {isa = PBXBuildFile; fileRef = CDD7853C255609AC001BB0BE /* BlockOrAllowList.m */; };
 		CDD992D72C4EC30000A1B406 /* InfoPlist.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = CDD992D62C4EC30000A1B406 /* InfoPlist.xcstrings */; };
 		CDEA3AD22E0724EC00FDD0C0 /* Profiles.m in Sources */ = {isa = PBXBuildFile; fileRef = CDEA3AD12E0724EC00FDD0C0 /* Profiles.m */; };
+		AA11BB22CC33DD44EE550001 /* LoopbackPolicy.m in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE550002 /* LoopbackPolicy.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -222,6 +223,8 @@
 		CDD992D62C4EC30000A1B406 /* InfoPlist.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = InfoPlist.xcstrings; sourceTree = "<group>"; };
 		CDEA3AD02E0724EC00FDD0C0 /* Profiles.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Profiles.h; sourceTree = "<group>"; };
 		CDEA3AD12E0724EC00FDD0C0 /* Profiles.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = Profiles.m; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE550002 /* LoopbackPolicy.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LoopbackPolicy.m; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE550003 /* LoopbackPolicy.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LoopbackPolicy.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -388,6 +391,8 @@
 				CD2CA18B2C3E9ED700D7BEAA /* Extension.entitlements */,
 				CDB2CC3524D61B3900D0EECE /* FilterDataProvider.h */,
 				CDB2CC3624D61B3900D0EECE /* FilterDataProvider.m */,
+				AA11BB22CC33DD44EE550002 /* LoopbackPolicy.m */,
+				AA11BB22CC33DD44EE550003 /* LoopbackPolicy.h */,
 				CDA1365D24EF4E57005AD424 /* GrayList.h */,
 				CDA1365124EF4E56005AD424 /* GrayList.m */,
 				CDB2CC3A24D61B3900D0EECE /* Info.plist */,
@@ -592,6 +597,7 @@
 				CDEA3AD22E0724EC00FDD0C0 /* Profiles.m in Sources */,
 				CDD7853D255609AC001BB0BE /* BlockOrAllowList.m in Sources */,
 				CDB2CC3724D61B3900D0EECE /* FilterDataProvider.m in Sources */,
+				AA11BB22CC33DD44EE550001 /* LoopbackPolicy.m in Sources */,
 				CDA1366224EF4E57005AD424 /* XPCUserClient.m in Sources */,
 				CDA1366D24EF4F89005AD424 /* Rules.m in Sources */,
 				CDA1366624EF4E57005AD424 /* Preferences.m in Sources */,
