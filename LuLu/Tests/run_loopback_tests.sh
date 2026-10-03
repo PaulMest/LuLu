@@ -16,4 +16,5 @@ clang -fobjc-arc -fmodules -Wno-deprecated-declarations -Wno-incomplete-implemen
 "$build/transitions"
 
 sh "$root/LuLu/Tests/run_loopback_regressions.sh"
+python3 "$root/LuLu/Tests/test_profile_switch_ui.py"
 python3 "$root/LuLu/Tests/test_profile_notifications.py"

@@ -737,7 +737,13 @@ bail:
     os_log_debug(logHandle, "user wants to change profile to '%{public}@'", profile ? profile : @"Default");
     
     //set profile via XPC
-    [xpcDaemonClient setProfile:profile];
+    if(![xpcDaemonClient setProfile:profile]) {
+        [self reload];
+        showAlert(NSAlertStyleWarning, NSLocalizedString(@"Unable to Switch Profile", @"Unable to Switch Profile"),
+                  NSLocalizedString(@"LuLu could not switch profiles. The current policy remains in effect.", @"Profile switch failed"),
+                  @[NSLocalizedString(@"OK", @"OK")]);
+        return;
+    }
     
     //tell app profiles changed
     // will grab profile's preferences too
