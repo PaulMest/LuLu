@@ -129,7 +129,15 @@ bail:
     @synchronized(preferences) {
         NSFileManager* files = NSFileManager.defaultManager;
         NSString* destination = [self resolve:name];
-        if(!destination || [files fileExistsAtPath:destination]) return NO;
+        if(!destination) return NO;
+        BOOL isDirectory = NO;
+        BOOL exists = [files fileExistsAtPath:destination isDirectory:&isDirectory];
+        // Preserve legacy incomplete folders outside the selectable namespace.
+        if(exists && (!isDirectory ||
+            ([files fileExistsAtPath:[destination stringByAppendingPathComponent:PREFS_FILE]] &&
+             [files fileExistsAtPath:[destination stringByAppendingPathComponent:RULES_FILE]]))) return NO;
+        NSString* preserved = exists ? [self.directory.stringByDeletingLastPathComponent stringByAppendingPathComponent:
+            [@".lulu-incomplete-" stringByAppendingString:NSUUID.UUID.UUIDString]] : nil;
         if(![files createDirectoryAtPath:self.directory withIntermediateDirectories:YES attributes:nil error:nil]) return NO;
         // Stage outside the enumerated profile directory; never expose incomplete profiles.
         NSString* staging = [self.directory.stringByDeletingLastPathComponent stringByAppendingPathComponent:
@@ -137,12 +145,17 @@ bail:
         if(![files createDirectoryAtPath:staging withIntermediateDirectories:NO attributes:nil error:nil]) return NO;
         BOOL added = NO;
         BOOL moved = NO;
+        BOOL preservedOld = NO;
         @try {
             NSMutableDictionary* candidate = [newPreferences mutableCopy];
             if(!candidate[PREF_ALLOW_LOCALHOST]) candidate[PREF_ALLOW_LOCALHOST] = @YES;
             if(![candidate writeToFile:[staging stringByAppendingPathComponent:PREFS_FILE] atomically:YES]) return NO;
             Rules* initialRules = [Rules new];
             if(![initialRules generateDefaultRules] || ![initialRules saveToPath:[staging stringByAppendingPathComponent:RULES_FILE]]) return NO;
+            if(preserved) {
+                if(![files moveItemAtPath:destination toPath:preserved error:nil]) return NO;
+                preservedOld = YES;
+            }
             if(![files moveItemAtPath:staging toPath:destination error:nil]) return NO;
             moved = YES;
             if(![preferences loadProfile:destination]) return NO;
@@ -152,6 +165,9 @@ bail:
         } @finally {
             if(!added && ![files removeItemAtPath:moved ? destination : staging error:nil]) {
                 os_log_error(logHandle, "ERROR: failed to clean up incomplete profile");
+            }
+            if(!added && preservedOld && ![files moveItemAtPath:preserved toPath:destination error:nil]) {
+                os_log_error(logHandle, "ERROR: could not restore incomplete profile; preserved at %{public}@", preserved);
             }
         }
     }

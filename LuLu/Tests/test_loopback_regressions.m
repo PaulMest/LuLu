@@ -21,9 +21,12 @@ static void waitFor(dispatch_semaphore_t s) { CHECK(dispatch_semaphore_wait(s,di
 -(void)complete { LuLuPolicyCompletion c;@synchronized(self){CHECK(_callbacks.count==1,"overlapping applies");c=_callbacks.firstObject;[_callbacks removeObjectAtIndex:0];}c(nil); }
 @end
 static NSString *defaultFile;
+static BOOL rejectSelection;
+static int selectionAttempts;
 @interface TestPreferences:Preferences @end
 @implementation TestPreferences
 -(NSString*)defaultPath{return defaultFile;}
+-(BOOL)setCurrentProfile:(NSString*)path{selectionAttempts++;return rejectSelection?NO:[super setCurrentProfile:path];}
 @end
 @interface TestProvider:NSObject
 @property LoopbackPolicy* policy;
@@ -93,11 +96,30 @@ int main(int argc,char**argv){@autoreleasepool{
    BOOL ok=[profiles delete:@"Original"];failRemoval=NO;method_setImplementation(m,originalRemove);
    CHECK(!ok,"expected failed deletion");CHECK([[preferences getCurrentProfile]isEqual:original],"failed deletion switched active profile");CHECK([preferences.preferences isEqual:baseline],"failed deletion changed active preferences");
   }else if([test isEqual:@"add-cleanup"] || [test isEqual:@"add-selection-failure"]){
-   if([test isEqual:@"add-selection-failure"])chmod(root.fileSystemRepresentation,0500);
+   selectionAttempts=0;rejectSelection=[test isEqual:@"add-selection-failure"];
    NSDictionary*invalid=[test isEqual:@"add-cleanup"]?@{@"invalid":[NSObject new]}:baseline;
-   BOOL ok=[profiles add:@"Incomplete" preferences:invalid];chmod(root.fileSystemRepresentation,0700);
+   BOOL ok=[profiles add:@"Incomplete" preferences:invalid];rejectSelection=NO;
+   if([test isEqual:@"add-selection-failure"])CHECK(selectionAttempts==1,"selection failure did not reach selection step");
    CHECK(!ok,"expected failed creation");CHECK(![[profiles enumerate]containsObject:@"Incomplete"],"failed creation left selectable incomplete profile");
    CHECK([[preferences getCurrentProfile]isEqual:original],"failed creation changed active profile");
+  }else if([test isEqual:@"reuse-incomplete"]){
+   NSString*partial=[profiles.directory stringByAppendingPathComponent:@"Partial"];
+   [[NSFileManager defaultManager]createDirectoryAtPath:partial withIntermediateDirectories:YES attributes:nil error:nil];
+   [baseline writeToFile:[partial stringByAppendingPathComponent:PREFS_FILE] atomically:YES];
+   [@"preserve me" writeToFile:[partial stringByAppendingPathComponent:@"marker"] atomically:YES encoding:NSUTF8StringEncoding error:nil];
+   rejectSelection=YES;
+   CHECK(![profiles add:@"Partial" preferences:baseline],"expected rejected replacement selection");
+   rejectSelection=NO;
+   CHECK([[NSFileManager defaultManager]fileExistsAtPath:[partial stringByAppendingPathComponent:@"marker"]],"failed replacement lost original folder");
+   CHECK(![[profiles enumerate]containsObject:@"Partial"],"partial folder unexpectedly listed");
+   CHECK([profiles add:@"Partial" preferences:baseline],"hidden incomplete folder blocked name reuse");
+   CHECK([[profiles enumerate]containsObject:@"Partial"],"replacement profile missing");
+   BOOL preserved=NO;
+   for(NSString*name in [[NSFileManager defaultManager]contentsOfDirectoryAtPath:root error:nil]) {
+    if([name hasPrefix:@".lulu-incomplete-"])preserved=[[NSFileManager defaultManager]fileExistsAtPath:[[root stringByAppendingPathComponent:name]stringByAppendingPathComponent:@"marker"]];
+   }
+   CHECK(preserved,"successful replacement discarded original folder");
+   CHECK(![profiles add:@"Partial" preferences:baseline],"complete profile overwritten");
   }else if([test isEqual:@"profile-list"]){
    CHECK(([profiles add:@"Listed" preferences:@{PREF_ALLOW_LOCALHOST:@YES,PREF_USE_BLOCK_LIST:@YES,PREF_BLOCK_LIST:@"/tmp/profile-block-list"}]),"list profile creation failed");
    CHECK([loadedListPath isEqual:@"/tmp/profile-block-list"],"profile activation did not load its block list");

@@ -9,7 +9,7 @@ clang -fmodules-cache-path="$build/modules" -fobjc-arc -fmodules -Wno-deprecated
  "$root/LuLu/Extension/LoopbackPolicy.m" "$root/LuLu/Extension/Preferences.m" "$root/LuLu/Extension/Profiles.m" \
  "$root/LuLu/Tests/test_loopback_regressions.m" -o "$build/regressions"
 failed=0
-for case in flow-profile-read timeout-recovery newer-policy save-recovery load-recovery delete-rollback add-cleanup add-selection-failure default-selection profile-list add-success; do
+for case in flow-profile-read timeout-recovery newer-policy save-recovery load-recovery delete-rollback add-cleanup add-selection-failure default-selection profile-list add-success reuse-incomplete; do
  "$build/regressions" "$case" || failed=1
 done
 exit "$failed"
