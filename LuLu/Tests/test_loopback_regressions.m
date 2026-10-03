@@ -48,6 +48,7 @@ static NSString*loadedListPath;
 -(BOOL)save{return YES;}
 -(BOOL)saveToPath:(NSString*)p{return [self.rules writeToFile:p atomically:YES];}
 -(BOOL)load{return YES;}
+-(void)activateRules:(NSMutableDictionary*)next fromPath:(NSString*)path{self.rules=next;}
 @end
 static BOOL failRemoval;
 static IMP originalRemove;

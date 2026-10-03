@@ -146,7 +146,7 @@ bail:
             if(![files moveItemAtPath:staging toPath:destination error:nil]) return NO;
             moved = YES;
             if(![preferences loadProfile:destination]) return NO;
-            @synchronized(rules) { rules.rules = initialRules.rules; }
+            [rules activateRules:initialRules.rules fromPath:[destination stringByAppendingPathComponent:RULES_FILE]];
             added = YES;
             return YES;
         } @finally {
