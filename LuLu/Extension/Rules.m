@@ -1355,14 +1355,17 @@ bail:
 // note: temporary rules are ignored
 -(BOOL)save
 {
+    return [self saveToPath:[self getPath]];
+}
+
+-(BOOL)saveToPath:(NSString*)rulesFile
+{
     //result
     BOOL result = NO;
     
     //error
     NSError* error = nil;
     
-    //rule's file
-    NSString* rulesFile = nil;
     
     //persistent rules
     NSMutableDictionary* persistentRules = nil;
@@ -1376,8 +1379,6 @@ bail:
     //init
     persistentRules = [NSMutableDictionary dictionary];
     
-    //init path
-    rulesFile = [self getPath];
     
     //dbg msg
     os_log_debug(logHandle, "saving (non-temp) rules to %{public}@", rulesFile);

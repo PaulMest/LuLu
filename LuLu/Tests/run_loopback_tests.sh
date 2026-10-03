@@ -14,3 +14,6 @@ clang -fobjc-arc -fmodules -Wno-deprecated-declarations -Wno-incomplete-implemen
     "$root/LuLu/Extension/LoopbackPolicy.m" "$root/LuLu/Extension/Preferences.m" \
     "$root/LuLu/Tests/test_loopback_policy.m" -o "$build/transitions"
 "$build/transitions"
+
+sh "$root/LuLu/Tests/run_loopback_regressions.sh"
+python3 "$root/LuLu/Tests/test_profile_notifications.py"

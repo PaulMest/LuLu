@@ -398,13 +398,7 @@ bail:
     }
 
     @synchronized(preferences) {
-        NSString* previousProfile = [preferences getCurrentProfile];
-        if(![profiles set:newProfilePath]) goto bail;
-        if(![preferences load]) {
-            // A failed restrictive transition must also restore the selected profile.
-            [profiles set:previousProfile];
-            goto bail;
-        }
+        if(![preferences loadProfile:newProfilePath]) goto bail;
         [rules load];
         [alerts.xpcUserClient rulesChanged];
         wasSet = YES;
@@ -437,17 +431,16 @@ bail:
         goto bail;
     }
 
-    //delete profile
-    if(YES != [profiles delete:name])
-    {
-        //err msg
-        os_log_error(logHandle, "ERROR: failed to delete profile");
-        goto bail;
+    @synchronized(preferences) {
+        NSString* previous = [preferences getCurrentProfile];
+        wasDeleted = [profiles delete:name];
+        NSString* current = [preferences getCurrentProfile];
+        if(!((previous == current) || [previous isEqualToString:current])) {
+            [alerts.xpcUserClient rulesChanged];
+        }
     }
-    
-    //happy
-    wasDeleted = YES;
-    
+    if(!wasDeleted) goto bail;
+
     //dbg msg
     os_log_debug(logHandle, "deleted profile %{public}@", name);
     

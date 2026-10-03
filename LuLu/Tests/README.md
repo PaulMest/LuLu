@@ -58,3 +58,16 @@ profile reloads, failed preference/profile saves, 100 queued transitions, and
 The optimization applies to IPv4 loopback only. IPv6 keeps LuLu's existing
 `FilterData` rule; live IPv6 loopback enforcement was not established on the
 macOS test host. These tests do not replace live socket enforcement checks.
+
+### Policy/profile failure regressions
+
+The loopback runner also executes `run_loopback_regressions.sh` and the
+headless XPC test (Python 3 required). Eleven isolated native cases cover
+nonblocking profile reads during a preference write, late-apply recovery,
+newer restrictive policy precedence, failed update/load saves, failed profile
+creation/selection/deletion, persisted default selection, and profile lists.
+The native tests compile production preferences, profile management, and policy
+coordination with controlled NE/rules collaborators and temporary files.
+The XPC test extracts and compiles the production deletion method against spies
+to check active-profile change notifications.
+No test activates or modifies the installed firewall.

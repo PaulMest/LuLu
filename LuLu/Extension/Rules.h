@@ -62,6 +62,9 @@
 //save
 -(BOOL)save;
 
+// Persist an isolated rules instance when preparing a profile.
+-(BOOL)saveToPath:(NSString*)rulesFile;
+
 //import rules
 -(BOOL)import:(NSData*)rules userOnly:(BOOL)userOnly;
 
