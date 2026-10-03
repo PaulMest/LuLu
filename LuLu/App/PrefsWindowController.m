@@ -821,7 +821,12 @@ bail:
                 os_log_debug(logHandle, "user wants to add profile '%{public}@'", self.profileName);
                 
                 //add profile via XPC
-                [xpcDaemonClient addProfile:self.profileName preferences:self.profilePreferences];
+                if(![xpcDaemonClient addProfile:self.profileName preferences:self.profilePreferences]) {
+                    [self.addProfileSheet orderOut:self];
+                    [self reload];
+                    showAlert(NSAlertStyleWarning, NSLocalizedString(@"Could Not Add Profile", @"Could Not Add Profile"), NSLocalizedString(@"The profile could not be saved or activated.", @"The profile could not be saved or activated."), @[NSLocalizedString(@"OK", @"OK")]);
+                    return;
+                }
                 
                 //hide profile sheet
                 [self.addProfileSheet orderOut:self];
@@ -1038,6 +1043,7 @@ bail:
     
     //response
     NSModalResponse response = 0;
+    BOOL deleted = NO;
     
     //name
     NSString* profile = nil;
@@ -1062,10 +1068,10 @@ bail:
     }
     
     //delete via XPC
-    [xpcDaemonClient deleteProfile:profile];
+    deleted = [xpcDaemonClient deleteProfile:profile];
     
     //dbg msg
-    os_log_debug(logHandle, "deleted profile '%{public}@'", profile);
+    if(deleted) os_log_debug(logHandle, "deleted profile '%{public}@'", profile);
     
     //tell app profiles changed
     // will grab profile's preferences too
@@ -1073,6 +1079,10 @@ bail:
     
     //tell app preferences (maybe) changed
     [((AppDelegate*)[[NSApplication sharedApplication] delegate]) preferencesChanged:self.preferences];
+
+    if(!deleted) {
+        showAlert(NSAlertStyleWarning, NSLocalizedString(@"Could Not Delete Profile", @"Could Not Delete Profile"), NSLocalizedString(@"The profile could not be deleted. The current settings have been refreshed.", @"The profile could not be deleted. The current settings have been refreshed."), @[NSLocalizedString(@"OK", @"OK")]);
+    }
     
 bail:
     
